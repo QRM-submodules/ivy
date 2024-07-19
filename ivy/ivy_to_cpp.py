@@ -1606,7 +1606,8 @@ def emit_some_action(header,impl,name,action,classname,inline=False):
         p = action.formal_returns[0]
         if p not in action.formal_params:
             code.append(ctypefull(p.sort,classname=classname) + ' ' + varname(p.name) + ';\n')
-            mk_nondet_sym(code,p,p.name,0)
+            if target.get() != "qrm" : # lauren-yrluo added
+                mk_nondet_sym(code,p,p.name,0)
     with ivy_ast.ASTContext(action):
         action.emit(code)
     if name in import_callers:
@@ -1638,11 +1639,20 @@ def emit_initial_action(header,impl,classname):
     global thunks
     thunks = impl
     code_line(header,'void __init()')
+    if target.get() == "qrm":  # lauren-yrluo added
+        impl.append('struct ivy_nondet_except {}; // lauren-yrluo added\n')
     open_scope(impl,line = 'void ' + classname + '::__init()')
     for action in im.module.initial_actions:
         open_loop(impl,action.formal_params)
         action.emit(impl)
         close_loop(impl,action.formal_params)
+    if target.get() == "qrm":  # lauren-yrluo added
+        for action in im.module.initializers:
+            action = action[1]
+            if isinstance(action, ia.Sequence):
+                emit_qrm_sequence(action.args, impl, is_init_action=True)
+            else:
+                action.emit(impl)
     close_scope(impl)
     
 int_ctypes = ["bool","int","long long","unsigned","unsigned long long"]
@@ -2125,7 +2135,7 @@ void * _thread_timer( void *tmr_void )
 #endif 
 """)
 
-    if target.get() == "repl":
+    if target.get() == "repl" or target.get() == "qrm":  # lauren-yrluo added "qrm"
         impl.append("""
 void CLASSNAME::install_reader(reader *r) {
     #ifdef _WIN32
@@ -2802,7 +2812,7 @@ z3::expr __z3_rename(const z3::expr &e, hash_map<std::string,std::string> &rn) {
             impl.append('template <>\n')
             impl.append('void __randomize<' + cfsname + '>( gen &g, const  z3::expr &v, const std::string &sort_name);\n')
         
-    if True or target.get() == "repl":
+    if True or target.get() == "repl" or target.get() == "qrm": # lauren-yrluo added "qrm"
         for sort_name in sorted(im.module.sort_destructors):
             csname = varname(sort_name)
             cfsname = classname + '::' + csname
@@ -2990,7 +3000,7 @@ z3::expr __z3_rename(const z3::expr &e, hash_map<std::string,std::string> &rn) {
                 emit_action_gen(sf,impl,name,action,classname)
 
     enum_sort_names = [s for s in sorted(il.sig.sorts) if isinstance(il.sig.sorts[s],il.EnumeratedSort)]
-    if True or target.get() == "repl":
+    if True or target.get() == "repl" or target.get() == "qrm": # lauren-yrluo added "qrm"
 
         # forward declare all the equality operations for variant types
 
@@ -3083,7 +3093,7 @@ z3::expr __z3_rename(const z3::expr &e, hash_map<std::string,std::string> &rn) {
                 close_scope(impl)
 
 
-        if target.get() in ["repl","test"]:
+        if target.get() in ["repl","test", "qrm"]:  # lauren-yrluo added "qrm"
 
             if  emit_main:
                 emit_repl_imports(header,impl,classname)
@@ -3255,7 +3265,7 @@ z3::expr __z3_rename(const z3::expr &e, hash_map<std::string,std::string> &rn) {
                     thing = "ivy.methodname(getargs)"
                     if action.formal_returns:
                         thing = '__ivy_out ' + number_format + ' << "= " << ' + thing + " << std::endl"
-                    if target.get() == "repl" and opt_trace.get():
+                    if (target.get() == "repl" or target.get() == "qrm") and opt_trace.get(): # lauren-yrluo added "qrm"
                         if action.formal_params:
                             trace_code = '__ivy_out ' + number_format + ' << "{}("'.format(actname.split(':')[-1]) + ' << "," '.join(' << {}'.format(arg) for arg in argstrings) + ' << ") {" << std::endl'
                         else:
@@ -3489,7 +3499,7 @@ def assign_symbol_value(header,lhs_text,m,v,same=False):
     else:
         mv = m(v)
         if mv != None:           
-            header.append('    ' + '.'.join(lhs_text) + ' = ' + m(v) + ';\n')
+            header.append('.'.join(lhs_text) + ' = ' + m(v) + ';\n')
         
 
 def assign_symbol_from_model(header,sym,m):
@@ -3502,8 +3512,10 @@ def assign_symbol_from_model(header,sym,m):
     fun = lambda v: cstr(m.eval_to_constant(v))
     if hasattr(sort,'dom'):
         for args in itertools.product(*[list(range(sort_card(s))) for s in sym.sort.dom]):
-            term = sym(*[il.Symbol(str(a),s) for a,s in zip(args,sym.sort.dom)])
+            # term = sym(*[il.Symbol(str(a),s) for a,s in zip(args,sym.sort.dom)])              # lauren-yrluo fixed
+            term = sym(*[il.Symbol(str(s.extension[a]),s) for a,s in zip(args,sym.sort.dom)])   # lauren-yrluo fixed
             ctext = varname(sym.name) + ''.join('['+str(a)+']' for a in args)
+            indent(header)
             assign_symbol_value(header,[ctext],fun,term)
     else:
         assign_symbol_value(header,[varname(sym.name)],fun,sym)
@@ -4268,8 +4280,11 @@ def open_bounded_loops(variables,body,exists=True):
     return header
 
 def close_bounded_loops(header,loops):
+    global indent_level  # lauren-yrluo fixed
     for i in loops:
         if i.endswith('{\n'):
+            indent_level -= 1   # lauren-yrluo fixed
+            indent(header)      # lauren-yrluo fixed
             header.append('}\n')
 
 
@@ -4299,7 +4314,10 @@ def emit_assign(self,header):
         tsort = il.FunctionSort(*([v.sort for v in vs] + [sort]))
         sym = il.Symbol(new_temp(header,sort=tsort),tsort)
         lhs = sym(*vs) if vs else sym
-        header.extend(loops)
+        for loop in loops: # lauren-yrluo fixed
+            indent(header)
+            header.append(loop)
+            indent_level += 1
 #        global temp_ctr
 #        tmp = '__tmp' + str(temp_ctr)
 #        temp_ctr += 1
@@ -4328,7 +4346,10 @@ def emit_assign(self,header):
 #            indent_level -= 1
 #            indent(header)
 #            header.append('}\n')
-        header.extend(loops)
+        for loop in loops: # lauren-yrluo fixed
+            indent(header)
+            header.append(loop)
+            indent_level += 1
         code = []
         indent(code)
         self.args[0].emit(header,code)
@@ -4347,14 +4368,17 @@ ia.HavocAction.emit = emit_havoc
 
 def emit_sequence(self,header):
     global indent_level
-    indent(header)
-    header.append('{\n')
-    indent_level += 1
-    for a in self.args:
-        a.emit(header)
-    indent_level -= 1 
-    indent(header)
-    header.append('}\n')
+    if target.get() == "qrm": # lauren-yrluo modified: use z3 to enumerate the nondeterministic assignment
+        emit_qrm_sequence(self.args, header)
+    else:
+        indent(header)
+        header.append('{\n')
+        indent_level += 1
+        for a in self.args:
+            a.emit(header)
+        indent_level -= 1 
+        indent(header)
+        header.append('}\n')
 
 ia.Sequence.emit = emit_sequence
 
@@ -4380,6 +4404,269 @@ def emit_assume(self,header):
 
 ia.AssumeAction.emit = emit_assume
 
+#### lauren-yrluo added for qrm ####
+from itertools import product, permutations
+def emit_one_nondet_model(model, model_vocab):
+    global indent_level
+    code_block = []
+    indent_level += 1
+    for sym in all_state_symbols():
+        if sym.name in im.module.destructor_sorts:
+            continue
+        if sym in im.module.params:
+            vs = variables(sym.sort.dom)
+            expr = sym(*vs) if vs else sym
+            open_loop(code_block,vs)
+            code_line(code_block,'this->' + code_eval(code_block,expr) + ' = ' + code_eval(code_block,expr))
+            close_loop(code_block,vs)
+        elif sym not in is_derived and not is_native_sym(sym):
+            if sym in model_vocab:
+                assign_symbol_from_model(code_block,sym,model)
+    indent_level -= 1
+    return code_block
+
+def eval_symbol_value(eval_func, symbol):
+    sort = symbol.sort
+    if hasattr(sort,'name') and sort.name in im.module.sort_destructors:
+        for sym in im.module.sort_destructors[sort.name]:
+            check_representable(sym,skip_args=1)
+            dom = sym.sort.dom[1:]
+            if dom:
+                for args in itertools.product(*[list(range(sort_card(s))) for s in dom]):
+                    term = sym(*([symbol] + [il.Symbol(str(a),s) for a,s in zip(args,dom)]))
+                    return eval_symbol_value(eval_func,term)
+            else:
+                return eval_symbol_value(eval_func, sym(symbol))
+    else:
+        return eval_func(symbol)
+
+def get_block_fmla_for_one_symbol(symbol, model):
+    if slv.solver_name(symbol) == None:
+        return None # skip interpreted symbols
+    if symbol.name in im.module.destructor_sorts:
+        return None # skip structs
+    name, sort = symbol.name, symbol.sort
+    really_check_representable(symbol)
+    eval_func  = lambda v: model.eval_to_constant(v)
+    block_symbols = []
+    if hasattr(sort,'dom'):
+        for args in itertools.product(*[list(range(sort_card(s))) for s in symbol.sort.dom]):
+            # term = sym(*[il.Symbol(str(a),s) for a,s in zip(args,sym.sort.dom)])              # lauren-yrluo fixed
+            term  = symbol(*[il.Symbol(str(s.extension[a]),s) for a,s in zip(args,symbol.sort.dom)])   # lauren-yrluo fixed
+            value = eval_symbol_value(eval_func,term)
+            if value != None:
+                block_symbols.append(il.Not(il.Equals(term, value)))
+    else:
+        value = eval_symbol_value(eval_func,symbol)
+        if value != None:
+            block_symbols.append(il.Not(il.Equals(symbol, value)))
+    block_sym_fmla = il.Or(*block_symbols)
+    return block_sym_fmla
+
+def get_block_fmla_for_all_symbols(model, model_vocab):
+    block_fmla = []
+    for sym in all_state_symbols():
+        if sym.name in im.module.destructor_sorts:
+            continue
+        if sym in im.module.params:
+            continue 
+        elif sym not in is_derived and not is_native_sym(sym):
+            if sym in model_vocab:
+                block_sym_fmla = get_block_fmla_for_one_symbol(sym, model) 
+                if block_sym_fmla != None: 
+                    block_fmla.append(block_sym_fmla)
+    block_fmla = il.Or(*block_fmla)
+    return block_fmla
+
+def get_used_sorts(block_fmla):
+    used_consts = list(ilu.used_constants_ast(block_fmla))
+    used_sorts  = set()
+    for const in used_consts:
+        used_sorts.add(const.sort)
+    return used_sorts
+
+def get_sorts_permutations(used_sorts):
+    all_sorts_permutations = []
+    for sort in used_sorts:
+        sort_permutations = permutations(sort.extension)
+        all_sorts_permutations.append(sort_permutations)
+    # cartesian product
+    sorts_permutations = list(product(*all_sorts_permutations))
+    permutation_maps = []
+    identity_perm    = []
+    for perm_index, permutation in enumerate(sorts_permutations):
+        perm_map = {}
+        if perm_index == 0: 
+            identity_perm = tuple([sort_perm for sort_perm in permutation])
+        for sort_id, sort_perm in enumerate(permutation):
+            for const_id, const in enumerate(sort_perm):
+                perm_map[identity_perm[sort_id][const_id]] = const
+        permutation_maps.append(perm_map)
+    return permutation_maps 
+
+def get_substitute_map_for_permutation(used_sorts, permutation):
+    subst = {}
+    for sort in used_sorts:
+        for const in sort.extension:
+            prev_symbol = il.Symbol(const,sort)
+            next_symbol = il.Symbol(permutation[const],sort)
+            subst[prev_symbol.name] = next_symbol 
+    return subst
+
+def substitute_formula(fmla,subs):
+    if isinstance(fmla, il.Symbol):
+        return subs.get(fmla.name, fmla)
+    return fmla.clone(substitute_formula(x,subs) for x in fmla.args)
+
+def get_fmla_orbit(fmla):
+    fmla_orbit = []
+    used_sorts = get_used_sorts(fmla)
+    sorts_permutations = get_sorts_permutations(used_sorts)
+    for permutation in sorts_permutations:
+        subst = get_substitute_map_for_permutation(used_sorts, permutation) 
+        symmetric_fmla = substitute_formula(fmla,subst)
+        fmla_orbit.append(symmetric_fmla)
+    return fmla_orbit
+
+def block_nondet_model_orbit(solver, model, model_vocab):
+    block_fmla       = get_block_fmla_for_all_symbols(model, model_vocab)
+    block_fmla_orbit = get_fmla_orbit(block_fmla)
+    for fmla in block_fmla_orbit:
+        solver.add(slv.formula_to_z3(fmla))
+
+def emit_nondeterministic_models(formula, model_vocab):
+    solver = slv.z3.Solver()
+    solver.add(slv.formula_to_z3(formula))
+    res = solver.check()
+    if res == slv.z3.unsat:
+        print(formula)
+        raise iu.IvyError(None,'assumptions are inconsistent')
+    code_blocks  = []
+    while res == slv.z3.sat:
+        model = slv.get_model(solver)
+        model = slv.HerbrandModel(solver, model, model_vocab)
+        code_block = emit_one_nondet_model(model, model_vocab)
+        code_blocks.append(code_block)
+        block_nondet_model_orbit(solver, model, model_vocab)
+        res = solver.check()
+        if res == slv.z3.unsat:
+            return code_blocks 
+    return code_blocks
+
+def emit_deterministic_args(actions):
+    det_args    = []
+    is_require_block = True 
+    for action in actions:
+        if action.name() != 'assume':
+            is_require_block = False
+        if ((action.name() == 'assume' and not is_require_block)  or  # let z3 solve assumption
+            action.name() == 'havoc'): # x := *
+            continue
+        else:
+            det_args.append(action)
+    global indent_level
+    indent_level += 1
+    code_block = []
+    for action in det_args: 
+        action.emit(code_block)
+    indent_level -= 1
+    return code_block
+
+def get_deterministc_used_symbols(actions):
+    symbols = set()
+    for action in actions:
+        if (action.name() == 'assume' or  # either action requirement or nondet assignment 
+            action.name() == 'havoc'):    # x := *
+            continue
+        else:
+            for arg in action.args:
+                symbols.update(ilu.used_symbols_clauses(arg))
+    return symbols
+
+def get_axiom_used_symbols():
+    constraints = [ilu.clauses_to_formula(im.module.init_cond)]
+    for a in im.module.axioms:
+        constraints.append(a)
+    for ldf in im.relevant_definitions(ilu.symbols_asts(constraints)):
+        constraints.append(fix_definition(ldf.formula).to_constraint())
+    clauses = ilu.formula_to_clauses(il.And(*constraints))
+    return ilu.used_symbols_clauses(clauses)
+
+def get_nondet_model_vocabulary(actions, nondet_formula, is_init_action):
+    det_symbols   = get_deterministc_used_symbols(actions)
+    axiom_symbols = get_axiom_used_symbols()
+    model_vocab = set()
+    if is_init_action:  # include all uninitialized relations
+        for sym in all_state_symbols():
+            if not sym in det_symbols and not sym in axiom_symbols:
+                model_vocab.add(sym)
+    model_vocab.update(ilu.used_symbols_clauses(nondet_formula))
+    return model_vocab
+
+def emit_nondeterministic_args(actions, is_init_action):
+    nondet_formulas  = []
+    is_require_block = True 
+    for action in actions:
+        if action.name() != 'assume':
+            is_require_block = False
+        if action.name() == 'assume' and not is_require_block:
+            nondet_formulas.append(action.formula)
+        # elif action.name() == 'havoc':
+        #     # instantiate all havoc assignments
+        #     havoc_symbol = action.args[0]
+        #     range_sort   = havoc_symbol.rep.sort.rng
+        #     havoc_clause = []
+        #     if isinstance(range_sort, lg.BooleanSort):
+        #         havoc_clause.append(il.Equals(havoc_symbol, il.And()))
+        #         havoc_clause.append(il.Equals(havoc_symbol, il.Or()))
+        #     elif isinstance(range_sort, lg.EnumeratedSort):
+        #         for const_name in range_sort.extension:
+        #             const_symbol = il.Symbol(const_name,range_sort)
+        #             havoc_clause.append(il.Equals(havoc_symbol, const_symbol))
+        #     nondet_formulas.append(il.Or(*havoc_clause))
+
+    code_blocks = []
+    nondet_formula = il.And(*nondet_formulas)
+    model_vocab = get_nondet_model_vocabulary(actions, nondet_formula, is_init_action)
+    if len(model_vocab) > 0:
+        code_blocks    = emit_nondeterministic_models(nondet_formula, model_vocab)
+    return code_blocks
+
+def emit_qrm_sequence(args, header, is_init_action=False):
+    global indent_level
+    det_code_block     = emit_deterministic_args(args)
+    nondet_code_blocks = emit_nondeterministic_args(args, is_init_action)
+    if len(nondet_code_blocks) == 0:
+        header.extend(det_code_block)
+    else:
+        indent(header)
+        header.append('/** QRM enumerates all satisfying model for reachability **/\n')
+        indent(header)
+        header.append('static int qrm_solution_count = 0;\n')
+        indent(header)
+        header.append(f'const int max_qrm_solution_count = {len(nondet_code_blocks)};' + '\n')
+        for i, nondet_code_block in enumerate(nondet_code_blocks):
+            if i == 0:
+                indent(header)
+                header.append('if (qrm_solution_count == 0){\n')
+                header.extend(det_code_block)
+            else:
+                indent(header)
+                header.append(f'else if (qrm_solution_count == {i})' + '{\n')
+            header.extend(nondet_code_block)
+            indent(header)
+            header.append('}\n')
+        indent(header)
+        header.append('++ qrm_solution_count;\n')
+        indent(header)
+        header.append('if (qrm_solution_count != max_qrm_solution_count)\n')
+        indent_level += 1
+        indent(header)
+        header.append('throw (ivy_nondet_except());\n')
+        indent_level -= 1
+        indent(header)
+        header.append('else qrm_solution_count = 0;  // reset\n')
+#### lauren-yrluo added for qrm ####
 
 def emit_call(self,header,ignore_vars=False):
     # tricky: a call can have variables on the lhs. we lower this to
@@ -4665,7 +4952,9 @@ int ask_ret(long long bound) {
 
 """)
 
-    impl.append("""
+    if target.get() == "qrm":     # lauren-yrluo added "qrm" 
+        impl.append("""
+    struct ivy_assume_err {};    // lauren-yrluo added
 
     class classname_repl : public classname {
 
@@ -4681,13 +4970,37 @@ int ask_ret(long long bound) {
     }
     virtual void ivy_assume(bool truth,const char *msg){
         if (!truth) {
-            __ivy_out << "assumption_failed(\\"" << msg << "\\")" << std::endl;
-            std::cerr << msg << ": error: assumption failed\\n";
+            // __ivy_out << "assumption_failed(\\"" << msg << "\\")" << std::endl;  // lauren-yrluo modified 
+            // std::cerr << msg << ": error: assumption failed\\n";                 // lauren-yrluo modified
+            CLOSE_TRACE
+            // __ivy_exit(1);           // lauren-yrluo modified 
+            throw (ivy_assume_err());   // lauren-yrluo modified
+        }
+    }
+        """.replace('classname',classname).replace('CLOSE_TRACE','__ivy_out << "}" << std::endl;' if opt_trace.get() else ''))
+    else:   # lauren-yrluo modified
+        impl.append("""
+    class classname_repl : public classname {
+
+    public:
+
+    virtual void ivy_assert(bool truth,const char *msg){
+        if (!truth) {
+            __ivy_out << "assertion_failed(\\"" << msg << "\\")" << std::endl;
+            std::cerr << msg << ": error: assertion failed\\n";
             CLOSE_TRACE
             __ivy_exit(1);
         }
     }
-    """.replace('classname',classname).replace('CLOSE_TRACE','__ivy_out << "}" << std::endl;' if opt_trace.get() else ''))
+    virtual void ivy_assume(bool truth,const char *msg){
+        if (!truth) {
+            __ivy_out << "assumption_failed(\\"" << msg << "\\")" << std::endl;   
+            std::cerr << msg << ": error: assumption failed\\n";                 
+            CLOSE_TRACE
+            __ivy_exit(1);            
+        }
+    }
+        """.replace('classname',classname).replace('CLOSE_TRACE','__ivy_out << "}" << std::endl;' if opt_trace.get() else ''))
 
     emit_param_decls(impl,classname+'_repl',im.module.params)
     impl.append(' : '+classname+'('+','.join(map(varname,im.module.params))+'){}\n')
@@ -5725,7 +6038,7 @@ public:
 };
 """.replace('classname',classname))
 
-target = iu.EnumeratedParameter("target",["impl","gen","repl","test","class"],"gen")
+target = iu.EnumeratedParameter("target",["impl","gen","repl","test","class", "qrm"],"gen")     # lauren-yrluo added "qrm"
 opt_classname = iu.Parameter("classname","")
 opt_build = iu.BooleanParameter("build",False)
 opt_trace = iu.BooleanParameter("trace",False)
@@ -5874,7 +6187,8 @@ def main_int(is_ivyc):
 
                     # Tricky: cone of influence may eliminate this symbol, but
                     # run-time accesses it.
-                    if '_generating' not in im.module.sig.symbols:
+                    # if '_generating' not in im.module.sig.symbols:                         # lauren-yrluo modified
+                    if '_generating' not in im.module.sig.symbols and target.get() != 'qrm': # lauren-yrluo modified
                         im.module.sig.add_symbol('_generating',il.BooleanSort())
 
 
