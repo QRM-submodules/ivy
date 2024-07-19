@@ -55,9 +55,9 @@ def build_z3():
 
 
     if platform.system() != 'Windows':
-        cmd = 'python scripts/mk_make.py --python --prefix {} --pypkgdir {}/'.format(cwd,ivydir)
+        cmd = 'python3 scripts/mk_make.py --python --prefix {} --pypkgdir {}/'.format(cwd,ivydir)
     else:
-        cmd = 'python scripts/mk_make.py -x --python --pypkgdir {}/'.format(ivydir)
+        cmd = 'python3 scripts/mk_make.py -x --python --pypkgdir {}/'.format(ivydir)
 
     do_cmd(cmd)
 
@@ -66,7 +66,7 @@ def build_z3():
     if platform.system() == 'Windows':
         do_cmd('"{}" & nmake'.format(find_vs()))
     else:
-        do_cmd('make -j 4')
+        do_cmd('make -j 8')
         do_cmd('make install')
 
     os.chdir(cwd)
@@ -200,17 +200,17 @@ def install_abc():
 if __name__ == "__main__":
     build_z3()
     install_z3()
-    build_picotls()
-    install_picotls()
+    # build_picotls()
+    # install_picotls()
 
-    if platform.system() == 'Windows':
-        print("*******************************************")
-        print("Model checking not supported on Windows")
-        print("*******************************************")
-    else:
-        build_aiger()
-        install_aiger()
-        build_abc()
-        install_abc()
+    # if platform.system() == 'Windows':
+    #     print("*******************************************")
+    #     print("Model checking not supported on Windows")
+    #     print("*******************************************")
+    # else:
+    #     build_aiger()
+    #     install_aiger()
+    #     build_abc()
+    #     install_abc()
         
 
