@@ -360,6 +360,7 @@ def resort_sort(sort,subs):
 def resort_symbol(sym,subs):
     return Symbol(sym.name,resort_sort(sym.sort,subs))
 
+Var = lg.Var # lauren-yrluo added to fix
 def resort_var(sym,subs):
     return Var(sym.name,resort_sort(sym.sort,subs))
 
@@ -369,9 +370,11 @@ def resort_ast(ast,subs):
     """
     args = [resort_ast(x,subs) for x in ast.args]
     if is_app(ast):
-        return resort_symbol(ast.rep)(*args)
+        # return resort_symbol(ast.rep)(*args)       # lauren-yrluo fixed
+        return resort_symbol(ast.rep, subs)(*args)   # lauren-yrluo fixed
     if is_quantifier(ast):
-        return type(ast)([resort_var(x,subs) for x in quantifier_vars(ast)],resort_ast(quantifier_body(ast)))
+        # return type(ast)([resort_var(x,subs) for x in quantifier_vars(ast)],resort_ast(quantifier_body(ast)))       # lauren-yrluo fixed
+        return type(ast)([resort_var(x,subs) for x in quantifier_vars(ast)],resort_ast(quantifier_body(ast), subs))   # lauren-yrluo fixed
     if is_variable(ast):
         return resort_var(ast,subs)
     return ast.clone(args)
