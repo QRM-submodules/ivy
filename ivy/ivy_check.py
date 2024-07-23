@@ -8,7 +8,7 @@ from . import ivy_utils as utl
 from . import ivy_logic_utils as lut
 from . import ivy_logic as lg
 from . import ivy_utils as iu
-from . import ivy_ui
+# from . import ivy_ui
 from . import ivy_module as im
 from . import ivy_alpha
 from . import ivy_art
