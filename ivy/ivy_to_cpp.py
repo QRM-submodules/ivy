@@ -4406,6 +4406,7 @@ ia.AssumeAction.emit = emit_assume
 
 #### lauren-yrluo added for qrm ####
 from itertools import product, permutations
+from math import factorial
 def emit_one_nondet_model(model, model_vocab):
     global indent_level
     code_block = []
@@ -4518,9 +4519,17 @@ def substitute_formula(fmla,subs):
         return subs.get(fmla.name, fmla)
     return fmla.clone(substitute_formula(x,subs) for x in fmla.args)
 
+def will_yield_huge_symmetric_group(used_sorts):
+    size = 1
+    for sort in used_sorts:
+        size *= factorial(len(sort.extension)) 
+    return size >= 1000000 
+
 def get_fmla_orbit(fmla):
     fmla_orbit = []
     used_sorts = get_used_sorts(fmla)
+    if will_yield_huge_symmetric_group(used_sorts):
+        return [fmla]
     sorts_permutations = get_sorts_permutations(used_sorts)
     for permutation in sorts_permutations:
         subst = get_substitute_map_for_permutation(used_sorts, permutation) 
