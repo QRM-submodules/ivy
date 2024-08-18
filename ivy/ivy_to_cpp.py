@@ -4406,7 +4406,6 @@ ia.AssumeAction.emit = emit_assume
 
 #### lauren-yrluo added for qrm ####
 from itertools import product, permutations
-from math import factorial
 def emit_one_nondet_model(model, model_vocab):
     global indent_level
     code_block = []
@@ -4479,11 +4478,35 @@ def get_block_fmla_for_all_symbols(model, model_vocab):
     block_fmla = il.Or(*block_fmla)
     return block_fmla
 
+registered_dependent_relations  = set()
+registered_dependent_relations.add('member')
+
+def get_elem_sort_if_set_sort(sort):
+    for dep_relation_name in registered_dependent_relations:
+        if dep_relation_name in im.module.sig.symbols:
+            dep_relation = im.module.sig.symbols[dep_relation_name]
+            args = dep_relation.sort.dom
+            assert(len(args) == 2)
+            if sort == args[1]:
+                return args[0]
+    return sort 
+
+def get_set_sort_if_elem_sort(sort):
+    for dep_relation_name in registered_dependent_relations:
+        if dep_relation_name in im.module.sig.symbols:
+            dep_relation = im.module.sig.symbols[dep_relation_name]
+            args = dep_relation.sort.dom
+            assert(len(args) == 2)
+            if sort == args[0]:
+                return args[1]
+    return sort 
+
 def get_used_sorts(block_fmla):
     used_consts = list(ilu.used_constants_ast(block_fmla))
     used_sorts  = set()
     for const in used_consts:
-        used_sorts.add(const.sort)
+        sort = get_elem_sort_if_set_sort(const.sort)
+        used_sorts.add(sort)
     return used_sorts
 
 def get_sorts_permutations(used_sorts):
@@ -4505,6 +4528,17 @@ def get_sorts_permutations(used_sorts):
         permutation_maps.append(perm_map)
     return permutation_maps 
 
+def get_permuted_set_constant(const, permutation):
+    lst    = const.split('__')
+    prefix = lst[0]
+    elems  = lst[1].split('_')
+    for elem_id, elem in enumerate(elems):
+        if elem != '':
+            assert(elem in permutation)
+            new_elem = permutation[elem]
+            elems[elem_id] = new_elem
+    return prefix + '__' + '_'.join(elems)
+
 def get_substitute_map_for_permutation(used_sorts, permutation):
     subst = {}
     for sort in used_sorts:
@@ -4512,6 +4546,13 @@ def get_substitute_map_for_permutation(used_sorts, permutation):
             prev_symbol = il.Symbol(const,sort)
             next_symbol = il.Symbol(permutation[const],sort)
             subst[prev_symbol.name] = next_symbol 
+        set_sort = get_set_sort_if_elem_sort(sort)
+        if set_sort != sort:
+            for const in set_sort.extension:
+                prev_symbol = il.Symbol(const,set_sort)
+                permuted_const = get_permuted_set_constant(const, permutation)
+                next_symbol = il.Symbol(permuted_const, set_sort)
+                subst[prev_symbol.name] = next_symbol 
     return subst
 
 def substitute_formula(fmla,subs):
@@ -4519,17 +4560,9 @@ def substitute_formula(fmla,subs):
         return subs.get(fmla.name, fmla)
     return fmla.clone(substitute_formula(x,subs) for x in fmla.args)
 
-def will_yield_huge_symmetric_group(used_sorts):
-    size = 1
-    for sort in used_sorts:
-        size *= factorial(len(sort.extension)) 
-    return size >= 1000000 
-
 def get_fmla_orbit(fmla):
     fmla_orbit = []
     used_sorts = get_used_sorts(fmla)
-    if will_yield_huge_symmetric_group(used_sorts):
-        return [fmla]
     sorts_permutations = get_sorts_permutations(used_sorts)
     for permutation in sorts_permutations:
         subst = get_substitute_map_for_permutation(used_sorts, permutation) 
