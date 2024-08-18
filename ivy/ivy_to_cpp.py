@@ -4636,11 +4636,11 @@ def get_axiom_used_symbols():
 
 def get_nondet_model_vocabulary(actions, nondet_formula, is_init_action):
     det_symbols   = get_deterministc_used_symbols(actions)
-    axiom_symbols = get_axiom_used_symbols()
+    # axiom_symbols = get_axiom_used_symbols()
     model_vocab = set()
     if is_init_action:  # include all uninitialized relations
         for sym in all_state_symbols():
-            if not sym in det_symbols and not sym in axiom_symbols:
+            if not sym in det_symbols:
                 model_vocab.add(sym)
     model_vocab.update(ilu.used_symbols_clauses(nondet_formula))
     return model_vocab
@@ -4666,7 +4666,13 @@ def emit_nondeterministic_args(actions, is_init_action):
         #             const_symbol = il.Symbol(const_name,range_sort)
         #             havoc_clause.append(il.Equals(havoc_symbol, const_symbol))
         #     nondet_formulas.append(il.Or(*havoc_clause))
-
+    if is_init_action:
+        constraints = [ilu.clauses_to_formula(im.module.init_cond)]
+        for a in im.module.axioms:
+            constraints.append(a)
+        for ldf in im.relevant_definitions(ilu.symbols_asts(constraints)):
+            constraints.append(fix_definition(ldf.formula).to_constraint())
+        nondet_formulas.extend(constraints)
     code_blocks = []
     nondet_formula = il.And(*nondet_formulas)
     model_vocab = get_nondet_model_vocabulary(actions, nondet_formula, is_init_action)
