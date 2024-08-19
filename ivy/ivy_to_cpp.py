@@ -4645,6 +4645,28 @@ def get_nondet_model_vocabulary(actions, nondet_formula, is_init_action):
     model_vocab.update(ilu.used_symbols_clauses(nondet_formula))
     return model_vocab
 
+def emit_havoc_args(actions, code_blocks):
+    for action in actions:
+        if action.name() == 'havoc':
+            havoc_symbol = action.args[0]
+            args    = [None, None]
+            args[0] = havoc_symbol 
+            range_sort  = havoc_symbol.rep.sort.rng
+            const_list  = [] 
+            if isinstance(range_sort, lg.BooleanSort):
+                const_list = [il.And(), il.Or()]
+            elif isinstance(range_sort, lg.EnumeratedSort):
+                for const_name in range_sort.extension:
+                    const_list.append(il.Symbol(const_name,range_sort))
+            global indent_level
+            indent_level += 1
+            for const in const_list:
+                code_block = []
+                args[1] = const
+                ia.AssignAction(*args).emit(code_block)
+                code_blocks.append(code_block)
+            indent_level -= 1
+
 def emit_nondeterministic_args(actions, is_init_action):
     nondet_formulas  = []
     is_require_block = True 
@@ -4678,6 +4700,7 @@ def emit_nondeterministic_args(actions, is_init_action):
     model_vocab = get_nondet_model_vocabulary(actions, nondet_formula, is_init_action)
     if len(model_vocab) > 0:
         code_blocks    = emit_nondeterministic_models(nondet_formula, model_vocab)
+    emit_havoc_args(actions, code_blocks)
     return code_blocks
 
 def emit_qrm_sequence(args, header, is_init_action=False):
