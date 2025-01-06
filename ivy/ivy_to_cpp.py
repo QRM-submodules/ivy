@@ -4471,7 +4471,7 @@ def get_block_fmla_for_all_symbols(model, model_vocab):
         if sym in im.module.params:
             continue 
         elif sym not in is_derived and not is_native_sym(sym):
-            if sym in model_vocab:
+            if sym in model_vocab and not str(sym) in registered_dependent_relations:
                 block_sym_fmla = get_block_fmla_for_one_symbol(sym, model) 
                 if block_sym_fmla != None: 
                     block_fmla.append(block_sym_fmla)
@@ -4537,6 +4537,7 @@ def get_permuted_set_constant(const, permutation):
             assert(elem in permutation)
             new_elem = permutation[elem]
             elems[elem_id] = new_elem
+    elems.sort()
     return prefix + '__' + '_'.join(elems)
 
 def get_substitute_map_for_permutation(used_sorts, permutation):
@@ -4561,14 +4562,14 @@ def substitute_formula(fmla,subs):
     return fmla.clone(substitute_formula(x,subs) for x in fmla.args)
 
 def get_fmla_orbit(fmla):
-    fmla_orbit = []
+    fmla_orbit = set()
     used_sorts = get_used_sorts(fmla)
     sorts_permutations = get_sorts_permutations(used_sorts)
     for permutation in sorts_permutations:
         subst = get_substitute_map_for_permutation(used_sorts, permutation) 
         symmetric_fmla = substitute_formula(fmla,subst)
-        fmla_orbit.append(symmetric_fmla)
-    return fmla_orbit
+        fmla_orbit.add(symmetric_fmla)
+    return list(fmla_orbit)
 
 def block_nondet_model_orbit(solver, model, model_vocab):
     block_fmla       = get_block_fmla_for_all_symbols(model, model_vocab)
@@ -4642,7 +4643,7 @@ def get_nondet_model_vocabulary(actions, nondet_formula, is_init_action):
         for sym in all_state_symbols():
             if not sym in det_symbols:
                 model_vocab.add(sym)
-    model_vocab.update(ilu.used_symbols_clauses(nondet_formula))
+    model_vocab.update(ilu.used_symbols_ast(nondet_formula)-ilu.used_constants_ast(nondet_formula))
     return model_vocab
 
 def emit_havoc_args(actions, code_blocks):
@@ -4675,19 +4676,6 @@ def emit_nondeterministic_args(actions, is_init_action):
             is_require_block = False
         if action.name() == 'assume' and not is_require_block:
             nondet_formulas.append(action.formula)
-        # elif action.name() == 'havoc':
-        #     # instantiate all havoc assignments
-        #     havoc_symbol = action.args[0]
-        #     range_sort   = havoc_symbol.rep.sort.rng
-        #     havoc_clause = []
-        #     if isinstance(range_sort, lg.BooleanSort):
-        #         havoc_clause.append(il.Equals(havoc_symbol, il.And()))
-        #         havoc_clause.append(il.Equals(havoc_symbol, il.Or()))
-        #     elif isinstance(range_sort, lg.EnumeratedSort):
-        #         for const_name in range_sort.extension:
-        #             const_symbol = il.Symbol(const_name,range_sort)
-        #             havoc_clause.append(il.Equals(havoc_symbol, const_symbol))
-        #     nondet_formulas.append(il.Or(*havoc_clause))
     if is_init_action:
         constraints = [ilu.clauses_to_formula(im.module.init_cond)]
         for a in im.module.axioms:
